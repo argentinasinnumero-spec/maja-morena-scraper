@@ -1,0 +1,31 @@
+{
+  "name": "maja-morena-director-comercial",
+  "version": "1.0.0",
+  "description": "Director Comercial Autónomo — Maja Morena",
+  "main": "index.js",
+  "scripts": {
+    "ciclo": "node index.js",
+    "nucleo": "node index.js --solo=nucleo",
+    "analista": "node index.js --solo=analista",
+    "recuperador": "node index.js --solo=recuperador",
+    "promociones": "node index.js --solo=promociones",
+    "combos": "node index.js --solo=combos",
+    "director": "node index.js --solo=director",
+    "inteligencia": "node index.js --solo=inteligencia",
+    "contenido": "node index.js --solo=contenido",
+    "asistente": "node index.js --solo=asistente",
+    "fidelizacion": "node index.js --solo=fidelizacion"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "axios": "^1.17.0",
+    "cheerio": "^1.2.0",
+    "date-fns": "^3.6.0",
+    "dotenv": "^16.4.5",
+    "firebase-admin": "^13.5.0",
+    "nodemailer": "^8.0.11",
+    "openai": "^4.67.0",
+    "puppeteer": "^24.43.1",
+    "puppeteer-core": "^24.43.1"
+  }
+}

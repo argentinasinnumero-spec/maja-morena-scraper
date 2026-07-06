@@ -1,0 +1,63 @@
+═══════════════════════════════════════════════════════════════
+  VARIABLES DE ENTORNO REQUERIDAS EN n8n
+  Settings → n8n → Environment Variables
+═══════════════════════════════════════════════════════════════
+
+DIRECTOR_WEBHOOK_SECRET=elegir-una-clave-secreta-larga
+
+WHATSAPP_API_URL=https://graph.facebook.com/v21.0/TU_NUMERO_ID
+WHATSAPP_API_TOKEN=TU_TOKEN_WHATSAPP_BUSINESS
+WHATSAPP_ADMIN_PHONE=5492346505558
+
+═══════════════════════════════════════════════════════════════
+  CREDENCIAL OAUTH2 para Firestore (Workflow 01 y 03)
+  Settings → Credentials → Add Credential → Google OAuth2 API
+═══════════════════════════════════════════════════════════════
+
+Scopes requeridos:
+  https://www.googleapis.com/auth/datastore
+
+O más fácil: usar Service Account:
+  Settings → Credentials → Add Credential → Google Service Account
+  → Pegar el contenido del mismo JSON que usás en agente/.env
+
+═══════════════════════════════════════════════════════════════
+  ORDEN DE IMPORTACIÓN
+═══════════════════════════════════════════════════════════════
+
+1. n8n → Workflows → Import from file
+2. Importar en este orden:
+   01_director_ciclo_automatico.json
+   02_director_trigger_manual.json
+   03_resumen_diario_whatsapp.json
+
+3. En cada workflow:
+   - Asignar la credencial de Google a los nodos Firestore
+   - Activar el workflow con el toggle
+
+4. Probar workflow 01 manualmente antes de activar
+   → Click en "Execute workflow" con el botón ▶
+
+═══════════════════════════════════════════════════════════════
+  RESUMEN DE LOS 3 WORKFLOWS
+═══════════════════════════════════════════════════════════════
+
+01 — Ciclo automático
+    Cron: 0hs, 6hs, 12hs, 18hs
+    → Registra inicio en Firestore
+    → Ejecuta: node index.js
+    → Si falla: WhatsApp de alerta al dueño
+
+02 — Trigger manual desde dashboard
+    Webhook POST: /webhook/director-trigger
+    → Verifica clave secreta
+    → Ejecuta: node index.js
+    → Responde JSON con resultado
+
+03 — Resumen diario
+    Cron: 20hs todos los días
+    → Lee estado del agente (Firestore)
+    → Lee alertas activas
+    → Lee campañas listas
+    → Arma mensaje resumen
+    → Envía WhatsApp al número del dueño

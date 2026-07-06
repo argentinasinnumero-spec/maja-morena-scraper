@@ -1,0 +1,208 @@
+{
+  "name": "Director Comercial — Resumen Diario 20hs por WhatsApp",
+  "nodes": [
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000001",
+      "name": "Cron 20hs diario",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 20 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000002",
+      "name": "Leer estado del agente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "https://firestore.googleapis.com/v1/projects/estadisticas-81fc4/databases/(default)/documents/agente_estado/actual",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      }
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000003",
+      "name": "Leer alertas criticas del dia",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 500],
+      "parameters": {
+        "method": "POST",
+        "url": "https://firestore.googleapis.com/v1/projects/estadisticas-81fc4/databases/(default)/documents:runQuery",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "{\n  \"structuredQuery\": {\n    \"from\": [{ \"collectionId\": \"alertas\" }],\n    \"where\": {\n      \"compositeFilter\": {\n        \"op\": \"AND\",\n        \"filters\": [\n          {\n            \"fieldFilter\": {\n              \"field\": { \"fieldPath\": \"nivel\" },\n              \"op\": \"IN\",\n              \"value\": { \"arrayValue\": { \"values\": [\n                { \"stringValue\": \"critica\" },\n                { \"stringValue\": \"alta\" }\n              ]}}\n            }\n          },\n          {\n            \"fieldFilter\": {\n              \"field\": { \"fieldPath\": \"estado\" },\n              \"op\": \"EQUAL\",\n              \"value\": { \"stringValue\": \"nueva\" }\n            }\n          }\n        ]\n      }\n    },\n    \"limit\": 5\n  }\n}",
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000004",
+      "name": "Leer campañas propuestas hoy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 700],
+      "parameters": {
+        "method": "POST",
+        "url": "https://firestore.googleapis.com/v1/projects/estadisticas-81fc4/databases/(default)/documents:runQuery",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "{\n  \"structuredQuery\": {\n    \"from\": [{ \"collectionId\": \"campañas\" }],\n    \"where\": {\n      \"fieldFilter\": {\n        \"field\": { \"fieldPath\": \"estado\" },\n        \"op\": \"EQUAL\",\n        \"value\": { \"stringValue\": \"propuesta\" }\n      }\n    },\n    \"orderBy\": [{ \"field\": { \"fieldPath\": \"created_at\" }, \"direction\": \"DESCENDING\" }],\n    \"limit\": 3\n  }\n}",
+        "options": {}
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000005",
+      "name": "Combinar datos",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [760, 500],
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "multiplex",
+        "options": {}
+      }
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000006",
+      "name": "Armar mensaje resumen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 500],
+      "parameters": {
+        "jsCode": "// Leer datos de los nodos anteriores\nconst estadoData = $('Leer estado del agente').item?.json?.fields || {};\nconst alertas    = $('Leer alertas criticas del dia').all() || [];\nconst campañas   = $('Leer campañas propuestas hoy').all() || [];\n\nconst decision  = estadoData.decision_director?.stringValue  || 'No disponible';\nconst resumen   = estadoData.resumen_ejecutivo?.stringValue   || '';\nconst mensaje   = estadoData.mensaje_al_equipo?.stringValue   || '';\nconst kpi       = estadoData.kpi_a_monitorear?.stringValue    || '';\n\nconst hoy = new Date().toLocaleDateString('es-AR', {\n  weekday: 'long', day: 'numeric', month: 'long'\n});\n\nlet txt = `🤖 *Director Comercial — ${hoy}*\\n\\n`;\n\ntxt += `📌 *Decisión del día:*\\n${decision}\\n\\n`;\n\nif (alertas.length > 0) {\n  txt += `⚠️ *${alertas.length} alerta(s) activa(s)*\\n`;\n  for (const a of alertas.slice(0, 3)) {\n    const f = a.json?.document?.fields || {};\n    txt += `• ${f.titulo?.stringValue || 'Sin título'}\\n`;\n  }\n  txt += '\\n';\n}\n\nif (campañas.length > 0) {\n  txt += `📣 *${campañas.length} campaña(s) lista(s) para activar*\\n`;\n  for (const c of campañas.slice(0, 3)) {\n    const f = c.json?.document?.fields || {};\n    txt += `• ${f.nombre?.stringValue || 'Sin nombre'}\\n`;\n  }\n  txt += '\\n';\n}\n\nif (kpi) txt += `📊 *Mirar hoy:* ${kpi}\\n\\n`;\n\nif (mensaje) txt += `💬 _\"${mensaje}\"_\\n\\n`;\n\ntxt += `_Maja Morena — Sistema de IA Comercial_`;\n\nreturn [{ json: { mensaje: txt } }];"
+      }
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000007",
+      "name": "Enviar WhatsApp al dueño",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1240, 500],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WHATSAPP_API_URL }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.WHATSAPP_API_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $env.WHATSAPP_ADMIN_PHONE }}\",\n  \"type\": \"text\",\n  \"text\": {\n    \"body\": \"{{ $json.mensaje }}\"\n  }\n}",
+        "options": {}
+      },
+      "continueOnFail": true
+    }
+  ],
+  "connections": {
+    "Cron 20hs diario": {
+      "main": [
+        [
+          {
+            "node": "Leer estado del agente",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Leer alertas criticas del dia",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Leer campañas propuestas hoy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer estado del agente": {
+      "main": [
+        [
+          {
+            "node": "Combinar datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer alertas criticas del dia": {
+      "main": [
+        [
+          {
+            "node": "Combinar datos",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Leer campañas propuestas hoy": {
+      "main": [
+        [
+          {
+            "node": "Combinar datos",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Combinar datos": {
+      "main": [
+        [
+          {
+            "node": "Armar mensaje resumen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar mensaje resumen": {
+      "main": [
+        [
+          {
+            "node": "Enviar WhatsApp al dueño",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataSuccessExecution": "last"
+  },
+  "tags": ["director-comercial", "maja-morena", "whatsapp", "resumen"]
+}
