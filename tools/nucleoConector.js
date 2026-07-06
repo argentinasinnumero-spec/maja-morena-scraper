@@ -912,13 +912,18 @@ async function scrapearLocal(browser, usuario, password, rango) {
       return { error: `Login fallido para ${usuario}  verificar contrasea en Configuracin`, exito: false };
     }
 
-    await navegarAHistorial(page);
-    await esperar(2000); // esperar que jQuery y daterangepicker inicialicen
-    await configurarFiltros(page, rango);
-    await clickListar(page);
+    // Intentar endpoint directo primero (más confiable que jQuery UI)
+    let rutaArchivo = await descargarExportDirecto(page, usuario, rango);
 
-    // Descargar XLSX via boton Exportar
-    const rutaArchivo = await descargarCSV(page, usuario, rango.fecha_iso);
+    // Fallback: UI con jQuery solo si el endpoint directo falló
+    if (!rutaArchivo) {
+      console.warn(`  [${usuario}] Endpoint directo falló, intentando via UI...`);
+      await navegarAHistorial(page);
+      await esperar(2000);
+      await configurarFiltros(page, rango);
+      await clickListar(page);
+      rutaArchivo = await descargarCSV(page, usuario, rango.fecha_iso);
+    }
     await hacerLogout(page);
     await page.close();
 
