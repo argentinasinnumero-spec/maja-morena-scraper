@@ -72,13 +72,15 @@ function diasEntre(desdeIso, hastaIso) {
   const ultimoDoc = snap.docs[0].id; // fecha_iso del último doc
   console.log(`[Railway] Último doc: ${ultimoDoc} | Doc esperado hoy: ${hoyArg}`);
 
-  if (ultimoDoc >= hoyArg) {
+  if (ultimoDoc > hoyArg) {
     console.log('[Railway] Ya está al día.');
     process.exit(0);
   }
 
-  // Docs faltantes entre ultimoDoc y hoyArg (inclusive)
-  const docsFaltantes = diasEntre(ultimoDoc, hoyArg);
+  // Si ultimoDoc === hoyArg, re-descargar igual (puede tener datos incorrectos)
+  // Docs faltantes entre (ultimoDoc - 1 día) y hoyArg para incluir hoy siempre
+  const desdeParaCalculo = ultimoDoc >= hoyArg ? diasEntre(restarUnDia(hoyArg), hoyArg) : diasEntre(ultimoDoc, hoyArg);
+  const docsFaltantes = desdeParaCalculo;
   console.log(`[Railway] Docs a crear: ${docsFaltantes.join(', ')}`);
 
   for (const docFecha of docsFaltantes) {
