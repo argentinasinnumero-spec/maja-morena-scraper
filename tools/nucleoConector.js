@@ -797,7 +797,9 @@ function parsearArchivoNucleo(rutaArchivo, rango) {
 
   // Detectar indices de columnas buscando el header
   // Header esperado: Sucursal Numero NumInteg Fecha Subtotal Descuento Total Efectivo T.credito T.debito Vales MercadoPago Saldo Estado
-  const header = filas[0].map(c => String(c).toLowerCase().trim());
+  const normalizar = s => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+  const header = filas[0].map(normalizar);
+  console.log(`  [CSV] Header: ${header.join(' | ')}`);
   const col = (nombres) => {
     for (const n of nombres) {
       const idx = header.findIndex(h => h.includes(n));
@@ -807,7 +809,7 @@ function parsearArchivoNucleo(rutaArchivo, rango) {
   };
 
   const C = {
-    numero:      col(['numero', 'nro', 'num']),
+    numero:      col(['numero', 'nro']),
     fecha:       col(['fecha']),
     subtotal:    col(['subtotal']),
     descuento:   col(['descuento', 'desc']),
@@ -875,9 +877,9 @@ function parsearArchivoNucleo(rutaArchivo, rango) {
   }
 
   if (!totalizador && detalles.length > 0) {
-    // Si no hay fila totalizadora, sumar manualmente
+    // Si no hay fila totalizadora, sumar manualmente desde los detalles
     console.warn('  [CSV] Sin fila totalizadora, calculando suma manual');
-    const suma = (campo) => detalles.reduce((a, d) => a + (d[campo] || 0), 0);
+    const suma = (campo) => detalles.reduce((a, d) => a + (parseNum(d[campo]) || 0), 0);
     totalizador = {
       subtotal:     String(suma('total')),
       descuento:    '0',
