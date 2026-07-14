@@ -4,6 +4,7 @@
  * Entry point para Railway.
  * Corre todos los días a las 10am Argentina (13:00 UTC).
  * Descarga el día comercial de ayer y recupera días perdidos.
+ * Si el día anterior tuvo locales con error, lo re-intenta automáticamente.
  */
 
 require('dotenv').config();
@@ -19,18 +20,15 @@ if (!admin.apps.length) {
   });
 }
 
-const { ejecutarDescargaDiaria, descargarFechaEspecifica } = require('./tools/nucleoConector');
+const { descargarFechaEspecifica } = require('./tools/nucleoConector');
 const db = admin.firestore();
 
-// Fecha de hoy en Argentina (UTC-3)
 function fechaArgentina() {
   const now = new Date();
   now.setHours(now.getUTCHours() - 3);
   return now.toISOString().split('T')[0];
 }
 
-// El doc resumen_diario/FECHA contiene el día comercial de FECHA-1.
-// Para obtener el doc /TARGET hay que llamar descargarFechaEspecifica(TARGET - 1 día).
 function restarUnDia(fechaIso) {
   const d = new Date(fechaIso + 'T12:00:00Z');
   d.setDate(d.getDate() - 1);
@@ -49,47 +47,67 @@ function diasEntre(desdeIso, hastaIso) {
   return dias;
 }
 
+async function descargarDoc(docFecha) {
+  const fechaComercial = restarUnDia(docFecha);
+  console.log(`\n[Railway] Descargando día comercial ${fechaComercial} → doc ${docFecha}...`);
+  const datos = await descargarFechaEspecifica(fechaComercial);
+  const errores = datos.locales_con_error || 0;
+  console.log(`  ✓ ${datos.locales_exitosos} locales OK${errores > 0 ? ` | ⚠️ ${errores} con error` : ''} | $${datos.venta_real?.toLocaleString('es-AR')}`);
+  return datos;
+}
+
 (async () => {
   console.log('[Railway] Iniciando —', new Date().toISOString());
 
   const hoyArg = fechaArgentina();
   console.log(`[Railway] Fecha Argentina: ${hoyArg}`);
 
-  // El doc de hoy = resumen_diario/{hoyArg} = día comercial de ayer
-  // Buscar último doc guardado
   const snap = await db.collection('resumen_diario')
     .orderBy('fecha', 'desc')
     .limit(1)
     .get();
 
   if (snap.empty) {
-    console.log('[Railway] Sin datos previos, descargando...');
-    await ejecutarDescargaDiaria();
+    console.log('[Railway] Sin datos previos, descargando hoy...');
+    await descargarDoc(hoyArg);
     console.log('[Railway] Listo.');
     process.exit(0);
   }
 
-  const ultimoDoc = snap.docs[0].id; // fecha_iso del último doc
+  const ultimoDoc = snap.docs[0].id;
   console.log(`[Railway] Último doc: ${ultimoDoc} | Doc esperado hoy: ${hoyArg}`);
 
-  if (ultimoDoc >= hoyArg) {
-    console.log('[Railway] Ya está al día.');
-    process.exit(0);
+  // Re-intentar días incompletos de los últimos 3 días
+  const ultimosTresDias = diasEntre(restarUnDia(restarUnDia(hoyArg)), hoyArg);
+  for (const fecha of ultimosTresDias) {
+    const docRef = await db.collection('resumen_diario').doc(fecha).get();
+    if (!docRef.exists) continue;
+    const data = docRef.data();
+    const errores = data.locales_con_error || 0;
+    if (errores > 0) {
+      const localesConError = (data.errores || []).map(e => e.usuario).join(', ') || `${errores} locales`;
+      console.log(`[Railway] ⚠️  Doc ${fecha} tiene ${errores} locales con error (${localesConError}) — re-intentando...`);
+      try {
+        await descargarDoc(fecha);
+      } catch (e) {
+        console.error(`  ✗ Re-intento fallido: ${e.message}`);
+      }
+    }
   }
 
-  const docsFaltantes = diasEntre(ultimoDoc, hoyArg);
-  console.log(`[Railway] Docs a crear: ${docsFaltantes.join(', ')}`);
-
-  for (const docFecha of docsFaltantes) {
-    // Para crear resumen_diario/docFecha, descargar el día comercial de docFecha-1
-    const fechaComercial = restarUnDia(docFecha);
-    console.log(`\n[Railway] Descargando día comercial ${fechaComercial} → doc ${docFecha}...`);
-    try {
-      const datos = await descargarFechaEspecifica(fechaComercial);
-      console.log(`  ✓ ${datos.locales_exitosos} locales | $${datos.venta_real?.toLocaleString('es-AR')}`);
-    } catch (e) {
-      console.error(`  ✗ Error: ${e.message}`);
+  // Descargar días faltantes hasta hoy
+  if (ultimoDoc < hoyArg) {
+    const docsFaltantes = diasEntre(ultimoDoc, hoyArg);
+    console.log(`[Railway] Docs nuevos a crear: ${docsFaltantes.join(', ')}`);
+    for (const docFecha of docsFaltantes) {
+      try {
+        await descargarDoc(docFecha);
+      } catch (e) {
+        console.error(`  ✗ Error: ${e.message}`);
+      }
     }
+  } else {
+    console.log('[Railway] Ya está al día.');
   }
 
   console.log('\n[Railway] Completado.');
