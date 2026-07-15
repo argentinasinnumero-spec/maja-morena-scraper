@@ -110,6 +110,18 @@ async function descargarDoc(docFecha) {
     console.log('[Railway] Ya está al día.');
   }
 
+  // Cada 2 días (días pares) correr el verificador de acumulados
+  const diaDelMes = new Date(hoyArg + 'T12:00:00Z').getUTCDate();
+  if (diaDelMes % 2 === 0) {
+    console.log('\n[Railway] Día par → ejecutando verificador de acumulados...');
+    try {
+      const { execSync } = require('child_process');
+      execSync('node verificador-acumulado.js', { stdio: 'inherit', cwd: __dirname });
+    } catch (e) {
+      console.error('[Railway] Error en verificador:', e.message);
+    }
+  }
+
   console.log('\n[Railway] Completado.');
   process.exit(0);
 })().catch(e => {
