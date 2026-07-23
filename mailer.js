@@ -15,8 +15,9 @@ const fmt = (n) => '$' + Math.round(n || 0).toLocaleString('es-AR');
 const sum = (arr, k) => arr.reduce((s, l) => s + (l[k] || 0), 0);
 
 function armarHTML(diario, mensual) {
-  const localesDiario = diario.locales || [];
-  const localesMensual = mensual?.locales || [];
+  const localesDiario = Array.isArray(diario.locales) ? diario.locales : Object.values(diario.locales || {});
+  const rawMensual = mensual?.locales;
+  const localesMensual = Array.isArray(rawMensual) ? rawMensual : Object.values(rawMensual || {});
 
   // Mapas por local_id
   const hoyMap = {};
