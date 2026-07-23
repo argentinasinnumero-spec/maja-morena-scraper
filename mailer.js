@@ -134,8 +134,12 @@ async function enviarReporte(diario, mensual) {
   }
 
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
     auth: { user: GMAIL_USER, pass: GMAIL_PASSWORD },
+    connectionTimeout: 20000,
+    greetingTimeout: 10000,
   });
 
   const fecha = diario.fecha_comercial || diario.fecha || new Date().toLocaleDateString('es-AR');
