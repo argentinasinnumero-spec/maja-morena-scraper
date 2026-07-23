@@ -1,32 +1,101 @@
 'use strict';
 
 /**
- * Envío de reporte diario por Gmail usando Nodemailer.
- * Lee resumen_diario y resumen_mensual de Firestore y arma el HTML.
+ * Envío de reporte diario por Gmail API (OAuth2, no SMTP).
+ * Funciona en Railway sin restricciones de puertos.
  */
 
-const nodemailer = require('nodemailer');
+const https = require('https');
 
-const GMAIL_USER      = process.env.GMAIL_USER;
-const GMAIL_PASSWORD  = process.env.GMAIL_APP_PASSWORD;
-const MAIL_DESTINO    = process.env.MAIL_DESTINO || 'gonzalofsegura@gmail.com,maurozanon33@gmail.com';
+const CLIENT_ID     = process.env.GMAIL_CLIENT_ID;
+const CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
+const REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN;
+const GMAIL_FROM    = process.env.GMAIL_USER || 'portogelatoespa@gmail.com';
+const MAIL_DESTINO  = process.env.MAIL_DESTINO || 'gonzalofsegura@gmail.com,maurozanon33@gmail.com';
 
 const fmt = (n) => '$' + Math.round(n || 0).toLocaleString('es-AR');
 const sum = (arr, k) => arr.reduce((s, l) => s + (l[k] || 0), 0);
 
+async function getAccessToken() {
+  const body = new URLSearchParams({
+    client_id:     CLIENT_ID,
+    client_secret: CLIENT_SECRET,
+    refresh_token: REFRESH_TOKEN,
+    grant_type:    'refresh_token',
+  }).toString();
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'oauth2.googleapis.com',
+      path:     '/token',
+      method:   'POST',
+      headers:  { 'Content-Type': 'application/x-www-form-urlencoded' },
+    }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        const json = JSON.parse(data);
+        if (json.access_token) resolve(json.access_token);
+        else reject(new Error(json.error_description || JSON.stringify(json)));
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+async function enviarViaGmailAPI(accessToken, to, subject, htmlBody) {
+  const mensaje = [
+    `From: "Maja Morena 📊" <${GMAIL_FROM}>`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    htmlBody,
+  ].join('\r\n');
+
+  const encoded = Buffer.from(mensaje).toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  const body = JSON.stringify({ raw: encoded });
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'gmail.googleapis.com',
+      path:     '/gmail/v1/users/me/messages/send',
+      method:   'POST',
+      headers:  {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type':  'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        if (res.statusCode === 200 || res.statusCode === 201) resolve(JSON.parse(data));
+        else reject(new Error(`Gmail API ${res.statusCode}: ${data}`));
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 function armarHTML(diario, mensual) {
-  const localesDiario = Array.isArray(diario.locales) ? diario.locales : Object.values(diario.locales || {});
-  const rawMensual = mensual?.locales;
+  const localesDiario  = Array.isArray(diario.locales) ? diario.locales : Object.values(diario.locales || {});
+  const rawMensual     = mensual?.locales;
   const localesMensual = Array.isArray(rawMensual) ? rawMensual : Object.values(rawMensual || {});
 
-  // Mapas por local_id
   const hoyMap = {};
   for (const l of localesDiario) hoyMap[l.local_id] = l;
 
   const mesMap = {};
   for (const l of localesMensual) mesMap[l.local_id] = { venta_mes: l.total, nombre: l.nombre, tipo: l.tipo };
 
-  // Unir todos los locales conocidos
   const todosIds = new Set([...Object.keys(hoyMap), ...Object.keys(mesMap)]);
   const locales = [...todosIds].map(lid => ({
     nombre:       hoyMap[lid]?.nombre || mesMap[lid]?.nombre || lid,
@@ -61,11 +130,11 @@ function armarHTML(diario, mensual) {
         ? `<td style="padding:8px 12px;border-bottom:1px solid #f0e0e0;color:#999">${l.nombre} ⚠️</td>`
         : `<td style="padding:8px 12px;border-bottom:1px solid #f0e0e0;font-weight:600">${l.nombre}</td>`;
       return `<tr style="background:${bg}">${nombreCell}
-        <td style="padding:8px 12px;text-align:right;border-bottom:1px solid #f0e0e0;color:${l.fallo_hoy?'#ccc':'inherit'}">${l.fallo_hoy ? '—' : fmt(l.venta_real)}</td>
-        <td style="padding:8px 12px;text-align:right;border-bottom:1px solid #f0e0e0">${l.fallo_hoy ? '—' : fmt(l.efectivo)}</td>
-        <td style="padding:8px 12px;text-align:right;border-bottom:1px solid #f0e0e0">${l.fallo_hoy ? '—' : fmt(l.credito)}</td>
-        <td style="padding:8px 12px;text-align:right;border-bottom:1px solid #f0e0e0">${l.fallo_hoy ? '—' : fmt(l.debito)}</td>
-        <td style="padding:8px 12px;text-align:right;border-bottom:1px solid #f0e0e0">${l.fallo_hoy ? '—' : fmt(l.mercado_pago)}</td>
+        <td style="padding:8px 12px;text-align:right;border-bottom:1px solid #f0e0e0;color:${l.fallo_hoy?'#ccc':'inherit'}">${l.fallo_hoy?'—':fmt(l.venta_real)}</td>
+        <td style="padding:8px 12px;text-align:right;border-bottom:1px solid #f0e0e0">${l.fallo_hoy?'—':fmt(l.efectivo)}</td>
+        <td style="padding:8px 12px;text-align:right;border-bottom:1px solid #f0e0e0">${l.fallo_hoy?'—':fmt(l.credito)}</td>
+        <td style="padding:8px 12px;text-align:right;border-bottom:1px solid #f0e0e0">${l.fallo_hoy?'—':fmt(l.debito)}</td>
+        <td style="padding:8px 12px;text-align:right;border-bottom:1px solid #f0e0e0">${l.fallo_hoy?'—':fmt(l.mercado_pago)}</td>
         <td style="padding:8px 12px;text-align:right;border-bottom:1px solid #f0e0e0;background:#fffbeb;font-weight:700;color:#b45309">${fmt(l.venta_mes)}</td>
       </tr>`;
     });
@@ -83,8 +152,8 @@ function armarHTML(diario, mensual) {
 
   const rankingHTML = [...locales].sort((a, b) => b.venta_real - a.venta_real).map((l, i) => {
     const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':`${i+1}.`;
-    const max = locales[0].venta_real;
-    const pct = max > 0 ? Math.round((l.venta_real / max) * 100) : 0;
+    const max = locales[0]?.venta_real || 1;
+    const pct = Math.round((l.venta_real / max) * 100);
     return `<tr>
       <td style="padding:6px 12px;font-weight:600;color:${l.fallo_hoy?'#999':'inherit'}">${medal} ${l.nombre}${l.fallo_hoy?' ⚠️':''}</td>
       <td style="padding:6px 12px;text-align:right;font-weight:700">${l.fallo_hoy?'—':fmt(l.venta_real)}</td>
@@ -128,32 +197,16 @@ function armarHTML(diario, mensual) {
 }
 
 async function enviarReporte(diario, mensual) {
-  if (!GMAIL_USER || !GMAIL_PASSWORD) {
-    console.warn('[Mailer] Sin credenciales Gmail (GMAIL_USER / GMAIL_APP_PASSWORD). Mail no enviado.');
+  if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN) {
+    console.warn('[Mailer] Sin credenciales OAuth2 Gmail. Mail no enviado.');
     return false;
   }
 
-  const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    auth: { user: GMAIL_USER, pass: GMAIL_PASSWORD },
-    connectionTimeout: 20000,
-    greetingTimeout: 10000,
-    family: 4,
-  });
-
-  const fecha = diario.fecha_comercial || diario.fecha || new Date().toLocaleDateString('es-AR');
-  const html  = armarHTML(diario, mensual);
-
-  await transporter.sendMail({
-    from:    `"Maja Morena 📊" <${GMAIL_USER}>`,
-    to:      MAIL_DESTINO,
-    subject: `Reporte Diario Maja Morena — ${fecha}`,
-    html,
-  });
-
-  console.log(`[Mailer] ✅ Mail enviado a: ${MAIL_DESTINO}`);
+  const accessToken = await getAccessToken();
+  const fecha  = diario.fecha_comercial || diario.fecha || new Date().toLocaleDateString('es-AR');
+  const html   = armarHTML(diario, mensual);
+  const result = await enviarViaGmailAPI(accessToken, MAIL_DESTINO, `Reporte Diario Maja Morena — ${fecha}`, html);
+  console.log(`[Mailer] ✅ Mail enviado. ID: ${result.id}`);
   return true;
 }
 
