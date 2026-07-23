@@ -122,6 +122,20 @@ async function descargarDoc(docFecha) {
     }
   }
 
+  // Enviar reporte por mail
+  try {
+    const { enviarReporte } = require('./mailer');
+    const snapDiario = await db.collection('resumen_diario').doc(hoyArg).get();
+    const snapMensual = await db.collection('resumen_mensual').doc(hoyArg.slice(0, 7)).get();
+    if (snapDiario.exists) {
+      await enviarReporte(snapDiario.data(), snapMensual.exists ? snapMensual.data() : null);
+    } else {
+      console.warn('[Railway] Sin doc diario para enviar mail.');
+    }
+  } catch (e) {
+    console.error('[Railway] Error enviando mail:', e.message);
+  }
+
   console.log('\n[Railway] Completado.');
   process.exit(0);
 })().catch(e => {
