@@ -95,7 +95,11 @@ function armarHTML(diario, mensual) {
   for (const l of localesDiario) hoyMap[l.local_id] = l;
 
   const mesMap = {};
-  for (const l of localesMensual) mesMap[l.local_id] = { venta_mes: l.total, nombre: l.nombre, tipo: l.tipo };
+  if (Array.isArray(localesMensual)) {
+    for (const l of localesMensual) mesMap[l.local_id] = { venta_mes: l.total || l.venta_real || 0, nombre: l.nombre, tipo: l.tipo };
+  } else {
+    for (const [lid, l] of Object.entries(rawMensual || {})) mesMap[lid] = { venta_mes: l.venta_real || l.total || 0, nombre: l.nombre, tipo: l.tipo };
+  }
 
   const todosIds = new Set([...Object.keys(hoyMap), ...Object.keys(mesMap)]);
   const locales = [...todosIds].map(lid => ({
