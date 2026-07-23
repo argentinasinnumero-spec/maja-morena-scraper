@@ -86,7 +86,8 @@ async function enviarViaGmailAPI(accessToken, to, subject, htmlBody) {
 }
 
 function armarHTML(diario, mensual) {
-  const localesDiario  = Array.isArray(diario.locales) ? diario.locales : Object.values(diario.locales || {});
+  const localesDiario  = Array.isArray(diario.ranking_locales) ? diario.ranking_locales :
+                         Array.isArray(diario.locales) ? diario.locales : Object.values(diario.locales || {});
   const rawMensual     = mensual?.locales;
   const localesMensual = Array.isArray(rawMensual) ? rawMensual : Object.values(rawMensual || {});
 
