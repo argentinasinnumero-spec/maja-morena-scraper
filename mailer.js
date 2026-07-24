@@ -47,7 +47,7 @@ async function getAccessToken() {
 
 async function enviarViaGmailAPI(accessToken, to, subject, htmlBody) {
   const mensaje = [
-    `From: "Maja Morena 📊" <${GMAIL_FROM}>`,
+    `From: "Maja Morena" <${GMAIL_FROM}>`,
     `To: ${to}`,
     `Subject: ${subject}`,
     'MIME-Version: 1.0',
@@ -212,7 +212,7 @@ async function enviarReporte(diario, mensual) {
   const accessToken = await getAccessToken();
   const fecha  = diario.fecha_comercial || diario.fecha || new Date().toLocaleDateString('es-AR');
   const html   = armarHTML(diario, mensual);
-  const result = await enviarViaGmailAPI(accessToken, MAIL_DESTINO, `Reporte Diario Maja Morena — ${fecha}`, html);
+  const result = await enviarViaGmailAPI(accessToken, MAIL_DESTINO, `Reporte Diario Maja Morena - ${fecha}`, html);
   console.log(`[Mailer] ✅ Mail enviado. ID: ${result.id}`);
   return true;
 }
