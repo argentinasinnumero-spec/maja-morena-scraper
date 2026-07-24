@@ -86,19 +86,21 @@ async function enviarViaGmailAPI(accessToken, to, subject, htmlBody) {
 }
 
 function armarHTML(diario, mensual) {
-  const localesDiario  = Array.isArray(diario.ranking_locales) ? diario.ranking_locales :
-                         Array.isArray(diario.locales) ? diario.locales : Object.values(diario.locales || {});
-  const rawMensual     = mensual?.locales;
-  const localesMensual = Array.isArray(rawMensual) ? rawMensual : Object.values(rawMensual || {});
+  const localesDiario = Array.isArray(diario.ranking_locales) ? diario.ranking_locales :
+                        Array.isArray(diario.locales) ? diario.locales : Object.values(diario.locales || {});
 
   const hoyMap = {};
   for (const l of localesDiario) hoyMap[l.local_id] = l;
 
+  // resumen_mensual.locales es un objeto { local_id: { nombre, tipo, venta_real, ... } }
   const mesMap = {};
-  if (Array.isArray(localesMensual)) {
-    for (const l of localesMensual) mesMap[l.local_id] = { venta_mes: l.total || l.venta_real || 0, nombre: l.nombre, tipo: l.tipo };
+  const localesMensualObj = mensual?.locales || {};
+  if (Array.isArray(localesMensualObj)) {
+    for (const l of localesMensualObj) mesMap[l.local_id] = { venta_mes: l.venta_real || l.total || 0, nombre: l.nombre, tipo: l.tipo };
   } else {
-    for (const [lid, l] of Object.entries(rawMensual || {})) mesMap[lid] = { venta_mes: l.venta_real || l.total || 0, nombre: l.nombre, tipo: l.tipo };
+    for (const [lid, l] of Object.entries(localesMensualObj)) {
+      mesMap[lid] = { venta_mes: l.venta_real || l.total || 0, nombre: l.nombre, tipo: l.tipo };
+    }
   }
 
   const todosIds = new Set([...Object.keys(hoyMap), ...Object.keys(mesMap)]);
