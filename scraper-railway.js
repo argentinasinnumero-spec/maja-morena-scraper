@@ -126,7 +126,9 @@ async function descargarDoc(docFecha) {
   try {
     const { enviarReporte } = require('./mailer');
     const snapDiario = await db.collection('resumen_diario').doc(hoyArg).get();
-    const snapMensual = await db.collection('resumen_mensual').doc(hoyArg.slice(0, 7)).get();
+    // El mes del resumen corresponde al día comercial (ayer), no al doc (hoy)
+    const fechaComercial = restarUnDia(hoyArg);
+    const snapMensual = await db.collection('resumen_mensual').doc(fechaComercial.slice(0, 7)).get();
     if (snapDiario.exists) {
       await enviarReporte(snapDiario.data(), snapMensual.exists ? snapMensual.data() : null);
     } else {
