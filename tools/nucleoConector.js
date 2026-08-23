@@ -926,11 +926,118 @@ async function scrapearLocal(browser, usuario, password, rango) {
       await clickListar(page);
       rutaArchivo = await descargarCSV(page, usuario, rango.fecha_iso);
     }
+
+    // Fallback DOM: leer totalizador directamente de la tabla si Export y CSV fallaron
+    if (!rutaArchivo) {
+      console.warn(`  [${usuario}] Export y CSV fallaron, leyendo totalizador del DOM...`);
+      await navegarAHistorial(page);
+      await esperar(1500);
+
+      const rangoEsperado = `${rango.fecha_desde} - ${rango.fecha_hasta}`;
+      let fechaConfirmada = false;
+      for (let intento = 0; intento < 6 && !fechaConfirmada; intento++) {
+        await page.evaluate((desde, hasta) => {
+          const $ = window.jQuery || window.$;
+          if ($) $('input').each(function() {
+            const drp = $(this).data('daterangepicker');
+            if (drp) { drp.setStartDate(desde); drp.setEndDate(hasta); }
+          });
+        }, rango.fecha_desde, rango.fecha_hasta);
+        await esperar(400);
+        await page.evaluate(() => {
+          const ap = document.querySelector('.applyBtn, .daterangepicker .applyBtn');
+          if (ap) { ap.click(); return; }
+          const btns = Array.from(document.querySelectorAll('button'));
+          const btn = btns.find(b => (b.innerText||'').trim().toLowerCase() === 'aplicar');
+          if (btn) btn.click();
+        });
+        await esperar(500);
+        const val = await page.evaluate(() => {
+          const inp = Array.from(document.querySelectorAll('input[type="text"],input:not([type])'))
+            .find(el => el.value && el.value.match(/\d{2}\/\d{2}\/\d{4}/));
+          return inp ? inp.value : '';
+        });
+        if (val.includes(rango.fecha_desde) && val.includes(rango.fecha_hasta)) {
+          fechaConfirmada = true;
+          console.log(`  [DOM] Fecha confirmada: ${val}`);
+        } else {
+          await page.evaluate((r) => {
+            const inp = Array.from(document.querySelectorAll('input[type="text"],input:not([type])'))
+              .find(el => el.value && el.value.match(/\d{2}\/\d{2}\/\d{4}/));
+            if (inp) {
+              const s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              s.call(inp, r);
+              inp.dispatchEvent(new Event('input', { bubbles: true }));
+              inp.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          }, rangoEsperado);
+          await esperar(600);
+        }
+      }
+
+      if (fechaConfirmada) {
+        // Setear horas 07:00
+        await page.evaluate(() => {
+          const times = document.querySelectorAll('input[type="time"]');
+          const s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          if (times[0]) { s.call(times[0], '07:00'); times[0].dispatchEvent(new Event('change')); }
+          if (times[1]) { s.call(times[1], '07:00'); times[1].dispatchEvent(new Event('change')); }
+        });
+        await esperar(300);
+        // Click Listar
+        await page.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll('button,a,input[type="button"]'));
+          const btn = btns.find(b => (b.innerText||b.value||'').toLowerCase().includes('listar'));
+          if (btn) btn.click();
+        });
+        await esperar(4000);
+
+        const domResult = await page.evaluate(() => {
+          const tabla = document.querySelector('table');
+          if (!tabla) return null;
+          const filas = Array.from(tabla.querySelectorAll('tbody tr'));
+          const ths = Array.from(tabla.querySelectorAll('thead th,thead td'));
+          const header = ths.map(th => (th.innerText||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim());
+          const col = (...ns) => { for (const n of ns) { const i = header.findIndex(h => h.includes(n)); if (i>=0) return i; } return -1; };
+          const C = { total: col('total'), efectivo: col('efectivo'), credito: col('credito','crédito'), debito: col('debito','débito'), vales: col('vales'), mp: col('mercado'), saldo: col('saldo') };
+          const p = s => parseFloat(String(s).replace(/\$/g,'').replace(/\./g,'').replace(/,/g,'.').trim())||0;
+          let totRow = null, ops = 0;
+          for (const fila of filas) {
+            const celdas = Array.from(fila.querySelectorAll('td'));
+            if (celdas.length < 4) continue;
+            const num = (celdas[0]?.innerText||celdas[1]?.innerText||'').trim();
+            if (!num || num === '0') totRow = celdas.map(c => (c.innerText||'').trim());
+            else ops++;
+          }
+          if (!totRow) return { total:0, efec:0, cred:0, deb:0, vales:0, mp:0, saldo:0, ops };
+          return { total: C.total>=0?p(totRow[C.total]):0, efec: C.efectivo>=0?p(totRow[C.efectivo]):0, cred: C.credito>=0?p(totRow[C.credito]):0, deb: C.debito>=0?p(totRow[C.debito]):0, vales: C.vales>=0?p(totRow[C.vales]):0, mp: C.mp>=0?p(totRow[C.mp]):0, saldo: C.saldo>=0?p(totRow[C.saldo]):0, ops };
+        });
+
+        if (domResult) {
+          const venta_real = domResult.total - domResult.saldo;
+          const info = LOCALES_MAP[usuario] || { nombre: usuario, ciudad: 'Desconocida', zona: 'desconocida', tipo: 'propio' };
+          await hacerLogout(page);
+          await page.close();
+          console.log(`  [DOM] ${info.nombre}: $${venta_real.toLocaleString('es-AR')} (${domResult.ops} ops)`);
+          return {
+            exito: true, usuario, local_id: usuario.toLowerCase(),
+            nombre: info.nombre, ciudad: info.ciudad, zona: info.zona, tipo: info.tipo || 'propio',
+            subtotal: domResult.total, descuento: 0, total_bruto: domResult.total, saldo_cc: domResult.saldo,
+            venta_real,
+            formas_pago: { efectivo: domResult.efec, credito: domResult.cred, debito: domResult.deb, vales: domResult.vales, mercado_pago: domResult.mp },
+            cantidad_operaciones: domResult.ops,
+            ticket_promedio: domResult.ops > 0 ? Math.round(venta_real / domResult.ops) : 0,
+            detalle_pedidos: [], fuente: 'dom',
+          };
+        }
+      }
+    }
+
     await hacerLogout(page);
     await page.close();
 
     if (!rutaArchivo) {
-      return { error: `Sin datos para ${usuario} (puede ser que no haya ventas ese dia)`, exito: false, usuario, detalles: [] };
+      return { error: `Sin datos para ${usuario} (Export 500 y DOM fallback falló)`, exito: false, usuario, detalles: [] };
     }
 
     const { totalizador, detalles } = parsearArchivoNucleo(rutaArchivo, rango);

@@ -122,15 +122,20 @@ async function descargarDoc(docFecha) {
     }
   }
 
-  // Enviar reporte por mail
+  // Enviar reporte por mail — solo si hay datos reales (locales_exitosos > 0)
   try {
     const { enviarReporte } = require('./mailer');
     const snapDiario = await db.collection('resumen_diario').doc(hoyArg).get();
-    // El mes del resumen corresponde al día comercial (ayer), no al doc (hoy)
     const fechaComercial = restarUnDia(hoyArg);
     const snapMensual = await db.collection('resumen_mensual').doc(fechaComercial.slice(0, 7)).get();
     if (snapDiario.exists) {
-      await enviarReporte(snapDiario.data(), snapMensual.exists ? snapMensual.data() : null);
+      const diarioData = snapDiario.data();
+      const localesOk = diarioData.locales_exitosos || 0;
+      if (localesOk === 0) {
+        console.warn('[Railway] 0 locales exitosos — mail no enviado para evitar reporte vacío.');
+      } else {
+        await enviarReporte(diarioData, snapMensual.exists ? snapMensual.data() : null);
+      }
     } else {
       console.warn('[Railway] Sin doc diario para enviar mail.');
     }
