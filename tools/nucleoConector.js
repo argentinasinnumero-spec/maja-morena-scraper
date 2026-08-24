@@ -995,22 +995,68 @@ async function scrapearLocal(browser, usuario, password, rango) {
         const domResult = await page.evaluate(() => {
           const tabla = document.querySelector('table');
           if (!tabla) return null;
-          const filas = Array.from(tabla.querySelectorAll('tbody tr'));
-          const ths = Array.from(tabla.querySelectorAll('thead th,thead td'));
-          const header = ths.map(th => (th.innerText||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim());
-          const col = (...ns) => { for (const n of ns) { const i = header.findIndex(h => h.includes(n)); if (i>=0) return i; } return -1; };
-          const C = { total: col('total'), efectivo: col('efectivo'), credito: col('credito','crédito'), debito: col('debito','débito'), vales: col('vales'), mp: col('mercado'), saldo: col('saldo') };
-          const p = s => parseFloat(String(s).replace(/\$/g,'').replace(/\./g,'').replace(/,/g,'.').trim())||0;
+          // Buscar en tbody Y tfoot por si el totalizador está en tfoot
+          const filas = Array.from(tabla.querySelectorAll('tbody tr, tfoot tr'));
+          const ths = Array.from(tabla.querySelectorAll('thead th, thead td'));
+          const norm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+          const header = ths.map(th => norm(th.innerText || th.textContent));
+          // Buscar índice exacto primero, luego parcial (evita que 'subtotal' matchee 'total')
+          const col = (...ns) => {
+            for (const n of ns) {
+              let i = header.findIndex(h => h === n);
+              if (i >= 0) return i;
+              i = header.findIndex(h => h.includes(n) && !h.startsWith('sub'));
+              if (i >= 0) return i;
+            }
+            return -1;
+          };
+          // Fallback a índices fijos de Núcleo IT: tot=5, efe=6, cre=7, deb=8, val=9, mp=10, sal=11
+          const C = {
+            numero: col('numero','nro') >= 0 ? col('numero','nro') : 0,
+            total:  col('total')  >= 0 ? col('total')  : 5,
+            efec:   col('efectivo') >= 0 ? col('efectivo') : 6,
+            cred:   col('credito','crédito') >= 0 ? col('credito','crédito') : 7,
+            deb:    col('debito','débito') >= 0 ? col('debito','débito') : 8,
+            vales:  col('vales') >= 0 ? col('vales') : 9,
+            mp:     col('mercado') >= 0 ? col('mercado') : 10,
+            saldo:  col('saldo') >= 0 ? col('saldo') : 11,
+          };
+          const txt = c => (c?.innerText || c?.textContent || '').trim();
+          const p   = s => parseFloat(String(s).replace(/\$/g,'').replace(/\./g,'').replace(/,/g,'.').trim()) || 0;
           let totRow = null, ops = 0;
           for (const fila of filas) {
             const celdas = Array.from(fila.querySelectorAll('td'));
             if (celdas.length < 4) continue;
-            const num = (celdas[0]?.innerText||celdas[1]?.innerText||'').trim();
-            if (!num || num === '0') totRow = celdas.map(c => (c.innerText||'').trim());
-            else ops++;
+            const numCell = txt(celdas[C.numero]);
+            if (!numCell || numCell === '0') {
+              totRow = celdas.map(txt);
+            } else {
+              ops++;
+            }
           }
-          if (!totRow) return { total:0, efec:0, cred:0, deb:0, vales:0, mp:0, saldo:0, ops };
-          return { total: C.total>=0?p(totRow[C.total]):0, efec: C.efectivo>=0?p(totRow[C.efectivo]):0, cred: C.credito>=0?p(totRow[C.credito]):0, deb: C.debito>=0?p(totRow[C.debito]):0, vales: C.vales>=0?p(totRow[C.vales]):0, mp: C.mp>=0?p(totRow[C.mp]):0, saldo: C.saldo>=0?p(totRow[C.saldo]):0, ops };
+          // Si no hay totalizador, sumar filas individuales
+          if (!totRow && ops > 0) {
+            let t=0,ef=0,cr=0,db=0,vl=0,mp=0,sl=0;
+            for (const fila of filas) {
+              const c = Array.from(fila.querySelectorAll('td')).map(txt);
+              if (!c[C.numero] || c[C.numero]==='0') continue;
+              t  += p(c[C.total]);
+              ef += p(c[C.efec]);
+              cr += p(c[C.cred]);
+              db += p(c[C.deb]);
+              vl += p(c[C.vales]);
+              mp += p(c[C.mp]);
+              sl += p(c[C.saldo]);
+            }
+            return { total:t, efec:ef, cred:cr, deb:db, vales:vl, mp, saldo:sl, ops };
+          }
+          if (!totRow) return { total:0, efec:0, cred:0, deb:0, vales:0, mp:0, saldo:0, ops:0 };
+          return {
+            total: p(totRow[C.total]), efec:  p(totRow[C.efec]),
+            cred:  p(totRow[C.cred]),  deb:   p(totRow[C.deb]),
+            vales: p(totRow[C.vales]), mp:    p(totRow[C.mp]),
+            saldo: p(totRow[C.saldo]), ops,
+          };
         });
 
         if (domResult) {
