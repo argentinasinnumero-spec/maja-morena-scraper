@@ -1062,6 +1062,40 @@ async function scrapearLocal(browser, usuario, password, rango) {
         if (domResult) {
           const venta_real = domResult.total - domResult.saldo;
           const info = LOCALES_MAP[usuario] || { nombre: usuario, ciudad: 'Desconocida', zona: 'desconocida', tipo: 'propio' };
+
+          // Intentar descargar Excel via botón UI (el endpoint directo da 500)
+          try {
+            const clientDom = await page.createCDPSession();
+            await clientDom.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: DESCARGAS_DIR });
+            const archivosAntes = fs.readdirSync(DESCARGAS_DIR).filter(f => f.endsWith('.xlsx') || f.endsWith('.xls'));
+            const clickedExport = await page.evaluate(() => {
+              const btns = Array.from(document.querySelectorAll('button, a, input[type="button"]'));
+              const exportBtn = btns.find(b => {
+                const txt = (b.innerText || b.value || b.title || b.getAttribute('aria-label') || '').toLowerCase();
+                return txt.includes('export') || txt.includes('excel') || txt.includes('descargar') || txt.includes('xls');
+              });
+              if (exportBtn) { exportBtn.click(); return exportBtn.innerText || exportBtn.title || 'sí'; }
+              return false;
+            });
+            if (clickedExport) {
+              console.log(`  [DOM-XLS] Click exportar — esperando descarga...`);
+              await esperar(8000);
+              const archivosDespues = fs.readdirSync(DESCARGAS_DIR).filter(f => f.endsWith('.xlsx') || f.endsWith('.xls'));
+              const nuevo = archivosDespues.find(f => !archivosAntes.includes(f));
+              if (nuevo) {
+                const nombreEstandar = `${usuario}_${rango.fecha_iso}.xlsx`;
+                fs.renameSync(path.join(DESCARGAS_DIR, nuevo), path.join(DESCARGAS_DIR, nombreEstandar));
+                console.log(`  [DOM-XLS] Guardado: ${nombreEstandar}`);
+              } else {
+                console.warn(`  [DOM-XLS] No apareció archivo nuevo`);
+              }
+            } else {
+              console.warn(`  [DOM-XLS] No se encontró botón exportar en UI`);
+            }
+          } catch (e) {
+            console.warn(`  [DOM-XLS] Error: ${e.message}`);
+          }
+
           await hacerLogout(page);
           await page.close();
           console.log(`  [DOM] ${info.nombre}: $${venta_real.toLocaleString('es-AR')} (${domResult.ops} ops)`);
