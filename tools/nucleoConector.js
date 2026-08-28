@@ -1494,7 +1494,9 @@ async function descargarFechaEspecifica(fechaStr) {
     const [dd, mm, yyyy] = fechaStr.split('/');
     fecha = new Date(Number(yyyy), Number(mm) - 1, Number(dd));
   } else {
-    fecha = new Date(fechaStr);
+    // ISO "2026-08-21" — usar constructor local para evitar UTC-midnight offset
+    const [yyyy, mm, dd] = fechaStr.split('-').map(Number);
+    fecha = new Date(yyyy, mm - 1, dd);
   }
   const datos = await scrapearTodosLosLocales(fecha, credenciales);
   await guardarEnFirebase(datos);
