@@ -1417,17 +1417,13 @@ async function guardarEnFirebase(datos) {
 
   console.log(`[Ncleo]  Guardado: ventas_nucleo/${fecha}  +  ${datos.detalle_por_local?.length || 0} docs por local`);
 
-  // Subir los Excel al sistema de estadísticas via Importador POS
+  // Sincronizar con sistema de estadísticas directo via Firestore (no depende de Excel)
   try {
-    const { subirArchivosDelDia } = require('./subirAEstadisticas');
-    const res = await subirArchivosDelDia(fecha);
-    if (res.exito) {
-      console.log(`[Ncleo]  ${res.archivos} archivos subidos al sistema de estadísticas OK`);
-    } else {
-      console.warn(`[Ncleo]  Error subiendo a estadísticas: ${res.error}`);
-    }
+    const { sincronizarDia } = require('./sincronizarEstadisticas');
+    const res = await sincronizarDia(datos);
+    console.log(`[Ncleo]  ${res.escritos} locales sincronizados a estadísticas OK`);
   } catch (e) {
-    console.warn('[Ncleo]  No se pudo subir a estadísticas (no crítico):', e.message);
+    console.warn('[Ncleo]  No se pudo sincronizar a estadísticas (no crítico):', e.message);
   }
 }
 
