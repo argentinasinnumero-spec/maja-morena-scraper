@@ -9,6 +9,38 @@
 
 require('dotenv').config();
 
+// Modo test: solo envía mails a TEST_MAIL_ONLY sin descargar nada nuevo
+if (process.env.TEST_MAIL_ONLY) {
+  const admin = require('firebase-admin');
+  if (!admin.apps.length) {
+    admin.initializeApp({ credential: admin.credential.cert({
+      projectId:   process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey:  process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    })});
+  }
+  const db = admin.firestore();
+  process.env.MAIL_DESTINO = process.env.TEST_MAIL_ONLY;
+  const { enviarReporte } = require('./mailer');
+  const fechas = (process.env.TEST_FECHAS || '').split(',').map(f => f.trim()).filter(Boolean);
+  if (!fechas.length) { console.error('TEST_FECHAS no definido'); process.exit(1); }
+  (async () => {
+    for (const fecha of fechas) {
+      console.log(`[Test] Enviando ${fecha} → ${process.env.TEST_MAIL_ONLY}`);
+      const mes = fecha.slice(0, 7);
+      const [snapD, snapM] = await Promise.all([
+        db.collection('resumen_diario').doc(fecha).get(),
+        db.collection('resumen_mensual').doc(mes).get(),
+      ]);
+      if (!snapD.exists) { console.warn(`  Sin doc para ${fecha}`); continue; }
+      await enviarReporte(snapD.data(), snapM.exists ? snapM.data() : null);
+      console.log(`[Test] ✅ ${fecha} enviado.`);
+    }
+    process.exit(0);
+  })().catch(e => { console.error(e.message); process.exit(1); });
+  return;
+}
+
 const admin = require('firebase-admin');
 if (!admin.apps.length) {
   admin.initializeApp({

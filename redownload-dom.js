@@ -78,16 +78,42 @@ async function descargarLocalDOM(usuario, password, rango, nombreLocal) {
     }
     await esperar(1500);
 
-    // Navegar a historial
+    // Navegar a historial y esperar que el daterangepicker esté inicializado
     await page.goto(`${NUCLEO_BASE}/NG/Order/HistorialDePedidos`, { waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
-    await esperar(1500);
+    // Esperar explícitamente a que jQuery y el daterangepicker estén listos
+    await page.waitForFunction(() => {
+      const $ = window.jQuery || window.$;
+      if (!$) return false;
+      let found = false;
+      $('input').each(function() { if ($(this).data('daterangepicker')) { found = true; return false; } });
+      return found;
+    }, { timeout: 10000 }).catch(() => {});
+    await esperar(1000);
+
+    // Verificar si la fecha por defecto ya es la que necesitamos (evita tocar el picker)
+    const valorDefault = await page.evaluate(() => {
+      // Leer todos los inputs y también el innerText del botón/span del daterangepicker
+      const inputs = Array.from(document.querySelectorAll('input'));
+      const inp = inputs.find(el => el.value && /\d{2}\/\d{2}\/\d{4}/.test(el.value));
+      if (inp) return inp.value;
+      // Para pickers que muestran el texto en el input pero .value="" (e.g. AngularJS bindings)
+      const $ = window.jQuery || window.$;
+      if ($) {
+        let v = '';
+        $('input').each(function() { const val = $(this).val(); if (/\d{2}\/\d{2}\/\d{4}/.test(val)) { v = val; return false; } });
+        if (v) return v;
+      }
+      return '';
+    });
 
     const rangoEsperado = `${rango.fecha_desde} - ${rango.fecha_hasta}`;
 
-    // Setear fechas — reintentar hasta que el input muestre el rango correcto
-    let fechaConfirmada = false;
-    for (let intento = 0; intento < 6 && !fechaConfirmada; intento++) {
-      // Método A: jQuery daterangepicker
+    // Si la fecha por defecto ya es la correcta, no tocar el picker
+    let fechaConfirmada = valorDefault.includes(rango.fecha_desde) && valorDefault.includes(rango.fecha_hasta);
+    if (fechaConfirmada) {
+      console.log(`    [Filtro] Fecha por defecto ya correcta: ${valorDefault}`);
+    } else {
+      // Setear fechas via jQuery daterangepicker
       await page.evaluate((desde, hasta) => {
         const $ = window.jQuery || window.$;
         if (!$) return;
@@ -96,47 +122,69 @@ async function descargarLocalDOM(usuario, password, rango, nombreLocal) {
           if (drp) {
             drp.setStartDate(desde);
             drp.setEndDate(hasta);
+            if (typeof drp.updateElement === 'function') drp.updateElement();
+            $(this).trigger('apply.daterangepicker', drp);
           }
         });
       }, rango.fecha_desde, rango.fecha_hasta);
-      await esperar(400);
-
-      // Click Aplicar del daterangepicker
-      await page.evaluate(() => {
-        const aplicar = document.querySelector('.applyBtn, .daterangepicker .applyBtn, button.applyBtn');
-        if (aplicar) { aplicar.click(); return; }
-        const btns = Array.from(document.querySelectorAll('button'));
-        const btn = btns.find(b => (b.innerText||'').trim().toLowerCase() === 'aplicar' || (b.innerText||'').trim().toLowerCase() === 'apply');
-        if (btn) btn.click();
-      });
-      await esperar(500);
+      await esperar(800);
 
       // Verificar que el input muestra el rango correcto
       const valorActual = await page.evaluate(() => {
-        const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
-        const dateInput = inputs.find(el => el.value && el.value.match(/\d{2}\/\d{2}\/\d{4}/));
-        return dateInput ? dateInput.value : '';
+        const inputs = Array.from(document.querySelectorAll('input'));
+        const dateInput = inputs.find(el => el.value && /\d{2}\/\d{2}\/\d{4}/.test(el.value));
+        if (dateInput) return dateInput.value;
+        const $ = window.jQuery || window.$;
+        if ($) {
+          let v = '';
+          $('input').each(function() { const val = $(this).val(); if (/\d{2}\/\d{2}\/\d{4}/.test(val)) { v = val; return false; } });
+          if (v) return v;
+        }
+        return '';
       });
 
-      if (valorActual.includes(rango.fecha_desde) && valorActual.includes(rango.fecha_hasta)) {
-        fechaConfirmada = true;
+      fechaConfirmada = valorActual.includes(rango.fecha_desde) && valorActual.includes(rango.fecha_hasta);
+      if (fechaConfirmada) {
         console.log(`    [Filtro] Fecha confirmada: ${valorActual}`);
       } else {
-        console.warn(`    [Filtro] Intento ${intento+1}: input muestra "${valorActual}", esperado "${rangoEsperado}" — reintentando...`);
-        // Método B: forzar valor en el input directamente
-        await page.evaluate((rangoStr) => {
-          const inputs = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'));
-          const dateInput = inputs.find(el => el.value && el.value.match(/\d{2}\/\d{2}\/\d{4}/));
-          if (dateInput) {
-            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-            setter.call(dateInput, rangoStr);
-            dateInput.dispatchEvent(new Event('input', { bubbles: true }));
-            dateInput.dispatchEvent(new Event('change', { bubbles: true }));
+        console.warn(`    [Filtro] Valor actual: "${valorActual}", esperado "${rangoEsperado}" — reintentando con reload...`);
+      // Recargar y reintentar una vez más con más tiempo
+      await page.goto(`${NUCLEO_BASE}/NG/Order/HistorialDePedidos`, { waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
+      await page.waitForFunction(() => {
+        const $ = window.jQuery || window.$;
+        if (!$) return false;
+        let found = false;
+        $('input').each(function() { if ($(this).data('daterangepicker')) { found = true; return false; } });
+        return found;
+      }, { timeout: 12000 }).catch(() => {});
+      await esperar(1000);
+      await page.evaluate((desde, hasta) => {
+        const $ = window.jQuery || window.$;
+        if (!$) return;
+        $('input').each(function() {
+          const drp = $(this).data('daterangepicker');
+          if (drp) {
+            drp.setStartDate(desde);
+            drp.setEndDate(hasta);
+            if (typeof drp.updateElement === 'function') drp.updateElement();
+            $(this).trigger('apply.daterangepicker', drp);
           }
-        }, rangoEsperado);
-        await esperar(600);
+        });
+      }, rango.fecha_desde, rango.fecha_hasta);
+      await esperar(1000);
+      const valorRetry = await page.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll('input'));
+        const dateInput = inputs.find(el => el.value && /\d{2}\/\d{2}\/\d{4}/.test(el.value));
+        return dateInput ? dateInput.value : '';
+      });
+      fechaConfirmada = valorRetry.includes(rango.fecha_desde) && valorRetry.includes(rango.fecha_hasta);
+      if (fechaConfirmada) {
+        console.log(`    [Filtro] Fecha confirmada (retry): ${valorRetry}`);
+      } else {
+        console.warn(`    [Filtro] Retry: "${valorRetry}" — abortando`);
       }
-    }
+      } // fin else retry
+    } // fin else setear fecha
 
     if (!fechaConfirmada) {
       console.error(`    [Filtro] No se pudo confirmar la fecha correcta para ${usuario}. Abortando.`);
