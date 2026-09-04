@@ -85,7 +85,7 @@ async function enviarViaGmailAPI(accessToken, to, subject, htmlBody) {
   });
 }
 
-function armarHTML(diario, mensual) {
+function armarHTML(diario, mensual, extra) {
   const localesDiario = Array.isArray(diario.ranking_locales) ? diario.ranking_locales :
                         Array.isArray(diario.locales) ? diario.locales : Object.values(diario.locales || {});
 
@@ -182,12 +182,18 @@ function armarHTML(diario, mensual) {
       <br><small style="color:#856404">El sistema reintentará automáticamente mañana.</small>
     </div>` : '';
 
+  const bannerMensaje = extra?.mensaje ? `
+    <div style="background:#eef6ff;border:1px solid #93c5fd;border-radius:6px;padding:12px 16px;margin-bottom:16px;color:#1e40af;font-size:13px;line-height:1.5">
+      ${extra.mensaje}
+    </div>` : '';
+
   return `<div style="max-width:800px;margin:0 auto;font-family:Arial,sans-serif">
     <div style="background:#c0392b;color:#fff;padding:16px 20px;border-radius:8px 8px 0 0">
       <h1 style="margin:0;font-size:18px">📊 Reporte Diario — ${fecha}</h1>
       <p style="margin:4px 0 0;font-size:14px;opacity:.9">💰 Venta Real Total: <strong>${fmt(ventaTotal)}</strong> · ${okCount} locales OK${errCount>0?' · ⚠️ '+errCount+' sin datos':''}</p>
     </div>
     <div style="background:#fff;padding:16px 20px;border:1px solid #f0e0e0;border-top:none;border-radius:0 0 8px 8px">
+      ${bannerMensaje}
       ${bannerErrores}
       <h2 style="margin:0 0 8px;color:#1a1a2e;font-size:15px">🏆 Ranking del día</h2>
       <table style="border-collapse:collapse;width:100%;font-size:13px"><thead><tr>
@@ -203,7 +209,7 @@ function armarHTML(diario, mensual) {
   </div>`;
 }
 
-async function enviarReporte(diario, mensual) {
+async function enviarReporte(diario, mensual, extra) {
   if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN) {
     console.warn('[Mailer] Sin credenciales OAuth2 Gmail. Mail no enviado.');
     return false;
@@ -211,7 +217,7 @@ async function enviarReporte(diario, mensual) {
 
   const accessToken = await getAccessToken();
   const fecha  = diario.fecha_comercial || diario.fecha || new Date().toLocaleDateString('es-AR');
-  const html   = armarHTML(diario, mensual);
+  const html   = armarHTML(diario, mensual, extra);
   const result = await enviarViaGmailAPI(accessToken, MAIL_DESTINO, `Reporte Diario Maja Morena - ${fecha}`, html);
   console.log(`[Mailer] ✅ Mail enviado. ID: ${result.id}`);
   return true;

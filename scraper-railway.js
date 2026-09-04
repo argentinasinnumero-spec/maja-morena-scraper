@@ -33,7 +33,8 @@ if (process.env.TEST_MAIL_ONLY) {
         db.collection('resumen_mensual').doc(mes).get(),
       ]);
       if (!snapD.exists) { console.warn(`  Sin doc para ${fecha}`); continue; }
-      await enviarReporte(snapD.data(), snapM.exists ? snapM.data() : null);
+      const extra = process.env.TEST_MENSAJE ? { mensaje: process.env.TEST_MENSAJE } : undefined;
+      await enviarReporte(snapD.data(), snapM.exists ? snapM.data() : null, extra);
       console.log(`[Test] ✅ ${fecha} enviado.`);
     }
     process.exit(0);
