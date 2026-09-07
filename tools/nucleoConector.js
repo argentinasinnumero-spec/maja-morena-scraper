@@ -1127,6 +1127,16 @@ async function scrapearLocal(browser, usuario, password, rango) {
     const venta_real = total - saldo;
     const info       = LOCALES_MAP[usuario] || { nombre: usuario, ciudad: 'Desconocida', zona: 'desconocida' };
 
+    // Si el CSV vino vacío (0 ventas y 0 ops) tratarlo como fallo → intentar DOM fallback
+    if (venta_real === 0 && detalles.length === 0) {
+      console.warn(`  [CSV] ${usuario}: archivo descargado pero sin datos (0 ventas, 0 ops) — intentando DOM fallback`);
+      rutaArchivo = null; // forzar caída al DOM
+      // El DOM fallback ocurre más arriba en el flujo; como ya estamos después del bloque DOM,
+      // retornamos error para que guardarEnFirebase lo trate como local_con_error
+      // y redownload-dom.js lo corrija al día siguiente o manualmente.
+      return { error: `CSV vacío para ${usuario} — DOM fallback requerido`, exito: false, usuario, detalles: [] };
+    }
+
     return {
       exito:    true,
       usuario,
