@@ -155,6 +155,21 @@ async function descargarDoc(docFecha) {
     }
   }
 
+  // Sincronizar resumen_diario → ventas_diarias (dashboard de estadísticas)
+  try {
+    const { sincronizarDia } = require('./tools/sincronizarEstadisticas');
+    const fechasASync = diasEntre(restarUnDia(restarUnDia(hoyArg)), hoyArg);
+    for (const fecha of fechasASync) {
+      const snapSync = await db.collection('resumen_diario').doc(fecha).get();
+      if (snapSync.exists) {
+        const res = await sincronizarDia(snapSync.data());
+        console.log(`[Railway] Sync estadísticas ${fecha}: ${res.escritos} locales`);
+      }
+    }
+  } catch (e) {
+    console.error('[Railway] Error sync estadísticas:', e.message);
+  }
+
   // Enviar reporte por mail — solo si hay datos reales (locales_exitosos > 0)
   try {
     const { enviarReporte } = require('./mailer');
