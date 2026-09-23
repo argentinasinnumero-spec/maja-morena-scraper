@@ -456,7 +456,7 @@ async function descargarExportDirecto(page, usuario, rango) {
     const startTime  = `${startDate}T10:00:00.000Z`; // 07:00 ART
     const endTime    = `${endDate}T09:59:00.000Z`;   // 06:59 ART
 
-    const exportUrl = `${NUCLEO_BASE}/NG/Order/ExportSalesHistory?ActivationState=0&Branches=1&CustomerId=0` +
+    const exportUrl = `${NUCLEO_BASE}/NG/Order/ExportSalesHistory?ActivationState=0&Branches=0&CustomerId=0` +
       `&EndDate=${endDate}&EndTime=${encodeURIComponent(endTime)}` +
       `&FiltroDePedido=0&SaleChannels=0&ShowMercadoPago=true&ShowNumberIntegration=false&ShowRappi=false` +
       `&StartDate=${startDate}&StartTime=${encodeURIComponent(startTime)}&TimeFilter=1`;
@@ -933,8 +933,31 @@ async function scrapearLocal(browser, usuario, password, rango) {
       await navegarAHistorial(page);
       await esperar(1500);
 
+      // Esperar que jQuery daterangepicker esté inicializado antes de intentar setear fecha
+      await page.waitForFunction(() => {
+        const $ = window.jQuery || window.$;
+        if (!$) return false;
+        let found = false;
+        $('input').each(function() { if ($(this).data('daterangepicker')) { found = true; return false; } });
+        return found;
+      }, { timeout: 10000 }).catch(() => {});
+      await esperar(800);
+
+      // Verificar si la fecha por defecto ya coincide (evita setter fallido en locales como WO)
+      const valorDefault = await page.evaluate(() => {
+        const inputs = Array.from(document.querySelectorAll('input'));
+        const inp = inputs.find(el => el.value && /\d{2}\/\d{2}\/\d{4}/.test(el.value));
+        if (inp) return inp.value;
+        const $ = window.jQuery || window.$;
+        if ($) { let v = ''; $('input').each(function() { const val = $(this).val(); if (/\d{2}\/\d{2}\/\d{4}/.test(val)) { v = val; return false; } }); if (v) return v; }
+        return '';
+      });
+
       const rangoEsperado = `${rango.fecha_desde} - ${rango.fecha_hasta}`;
-      let fechaConfirmada = false;
+      let fechaConfirmada = valorDefault.includes(rango.fecha_desde) && valorDefault.includes(rango.fecha_hasta);
+      if (fechaConfirmada) {
+        console.log(`  [DOM] Fecha por defecto ya correcta: ${valorDefault}`);
+      }
       for (let intento = 0; intento < 6 && !fechaConfirmada; intento++) {
         await page.evaluate((desde, hasta) => {
           const $ = window.jQuery || window.$;
