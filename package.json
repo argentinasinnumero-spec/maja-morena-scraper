@@ -22,6 +22,7 @@
     "cheerio": "^1.2.0",
     "date-fns": "^3.6.0",
     "dotenv": "^16.4.5",
+    "firebase": "^11.10.0",
     "firebase-admin": "^13.5.0",
     "nodemailer": "^8.0.11",
     "openai": "^4.67.0",
